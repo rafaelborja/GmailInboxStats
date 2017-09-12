@@ -8,6 +8,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Map.Entry;
 import java.util.stream.Stream;
 
 import com.google.api.client.auth.oauth2.Credential;
@@ -118,37 +119,58 @@ public class GMailInboxStats {
 			}
 		}
 
-		ListMessagesResponse response = service.users().messages().list(user).setQ("label:INBOX is:unread").execute();
-
+		ListMessagesResponse response = service.users().messages().list(user).setQ("label:INBOX")
+				.execute();
+ // label:unread
 		List<Message> messages = new ArrayList<Message>();
 		while (response.getMessages() != null) {
 			messages.addAll(response.getMessages());
 			if (response.getNextPageToken() != null) {
 				String pageToken = response.getNextPageToken();
-				response = service.users().messages().list(user).setQ("label:INBOX").setPageToken(pageToken).execute();
+				response = service.users().messages().list(user).setQ("label:inbox").setPageToken(pageToken).execute(); //
 			} else {
 				break;
 			}
 		}
 
 		Map<String, Integer> emailAddressCountMap = new HashMap<String, Integer>();
-		for (Message message : messages) {
-			Message m1 = service.users().messages().get(user, message.getId()).setFields("payload").execute();
+		messages.parallelStream().forEach(message -> {
+			try {
+				Message m1 = service.users().messages().get(user, message.getId()).setFields("payload/headers")
+						.execute();
 
-			Stream<String> fromHeaderValue = m1.getPayload().getHeaders().stream()
-					.filter(h -> "From".equals(h.getName())).map(h -> h.getValue());
+				Stream<String> fromHeaderValue = m1.getPayload().getHeaders().stream()
+						.filter(h -> "From".equals(h.getName())).map(h -> h.getValue());
 
-			String emailAddress = fromHeaderValue.toArray(String[]::new)[0];
-			Integer count = emailAddressCountMap.get(emailAddress);
-			if (count == null) {
-				count = 0;
+				String[] tmpArray = fromHeaderValue.toArray(String[]::new);
+				if (tmpArray.length > 0) {
+					String emailAddress = tmpArray[0];
+					synchronized (GMailInboxStats.class) {
+						Integer count = emailAddressCountMap.get(emailAddress);
+						if (count == null) {
+							count = 0;
+						}
+						emailAddressCountMap.put(emailAddress, count + 1);
+
+						System.out.println(emailAddress + ": " + count);
+					}
+				}
 			}
-			emailAddressCountMap.put(emailAddress, count + 1);
-		}
 
-		for (Map.Entry<String, Integer> entry : emailAddressCountMap.entrySet()) {
-			System.out.println("Address : " + entry.getKey() + " Count : " + entry.getValue());
-		}
+			catch (Exception e3) {
+				// TODO Auto-generated catch block
+				e3.printStackTrace();
+			}
+		});
+
+		Stream<Entry<String, Integer>> sortedEmailAddressCountMap = emailAddressCountMap.entrySet().stream()
+				.filter(e -> e.getValue() > 20).sorted((e1, e2) -> e1.getValue().compareTo(e2.getValue()));
+
+		System.out.println("RESULTS ORDERED AND FILTERED");
+		sortedEmailAddressCountMap.forEach(e -> {
+			System.out.println("Address : " + e.getKey() + " Count : " + e.getValue());
+		});
+
 	}
 	//
 	// /**

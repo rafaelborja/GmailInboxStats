@@ -9,6 +9,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Map.Entry;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
 import com.google.api.client.auth.oauth2.Credential;
@@ -61,6 +63,10 @@ public class GMailInboxStats {
 	 * ~/.credentials/gmail-java-quickstart
 	 */
 	private static final List<String> SCOPES = Arrays.asList(GmailScopes.GMAIL_LABELS, GmailScopes.GMAIL_READONLY);
+
+	/** Pattern to capture valid email addresses */
+	public static final Pattern VALID_EMAIL_ADDRESS_REGEX = Pattern
+			.compile("(?<email>[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,6})", Pattern.CASE_INSENSITIVE);
 
 	static {
 		try {
@@ -119,9 +125,8 @@ public class GMailInboxStats {
 			}
 		}
 
-		ListMessagesResponse response = service.users().messages().list(user).setQ("label:INBOX")
-				.execute();
- // label:unread
+		ListMessagesResponse response = service.users().messages().list(user).setQ("label:inbox label:unread").execute();
+		// label:unread
 		List<Message> messages = new ArrayList<Message>();
 		while (response.getMessages() != null) {
 			messages.addAll(response.getMessages());
@@ -140,7 +145,7 @@ public class GMailInboxStats {
 						.execute();
 
 				Stream<String> fromHeaderValue = m1.getPayload().getHeaders().stream()
-						.filter(h -> "From".equals(h.getName())).map(h -> h.getValue());
+						.filter(h -> "From".equals(h.getName())).map(h -> getEmailAddress(h.getValue()));
 
 				String[] tmpArray = fromHeaderValue.toArray(String[]::new);
 				if (tmpArray.length > 0) {
@@ -172,15 +177,16 @@ public class GMailInboxStats {
 		});
 
 	}
-	//
-	// /**
-	// * Returns only the email addres contained in the string
-	// */
-	// public static getEmailAddress(String emailField) {
-	// javax.mail.internet.MimeMessage.MimeMessage
-	// Matcher emailMatcher = ptr.matcher(f);
-	// emailMatcher.find();
-	// System.out.println(f);
-	// }
+
+	/**
+	 * Returns only the email address contained in the string
+	 */
+	public static String getEmailAddress(String emailField) {
+		Matcher emailMatcher = VALID_EMAIL_ADDRESS_REGEX.matcher(emailField);
+		if (emailMatcher.find()) {
+			return emailMatcher.group("email").toLowerCase();
+		} else
+			return emailField;
+	}
 
 }

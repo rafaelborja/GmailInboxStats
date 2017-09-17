@@ -34,7 +34,12 @@ import com.google.api.services.gmail.model.Message;
  * Simple app to read your gmail inbox and provide status about the messages
  * waiting to be cleaned.
  * 
- * https://github.com/rafaelborja/
+ * This version shows the number of messages from each recipient based on the user query.
+ * 
+ * @see #QUERRY
+ * @see #USER
+ * 
+ * https://github.com/rafaelborja/GmailInboxStats
  * 
  * @author Rafael Borja
  *
@@ -67,6 +72,19 @@ public class GMailInboxStats {
 	/** Pattern to capture valid email addresses */
 	public static final Pattern VALID_EMAIL_ADDRESS_REGEX = Pattern
 			.compile("(?<email>[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,6})", Pattern.CASE_INSENSITIVE);
+
+	/** Number of threads to simultaneous download message headers */
+	final static String PARALLEL_THREADS = "32";
+
+	/**
+	 * Minimum number of messages from the same recipient to be shown in results
+	 */
+	final static int MIN_OCURRENCES_THRESHOLD = 5;
+	
+	/** User query. Scope of stats */
+	final static String QUERRY = "is:unread label:INBOX";
+	
+	final static String USER = "rdmborja@gmail.com";
 
 	static {
 		try {
@@ -113,8 +131,7 @@ public class GMailInboxStats {
 		Gmail service = getGmailService();
 
 		// Print the labels in the user's account.
-		String user = "rdmborja@gmail.com";
-		ListLabelsResponse listResponse = service.users().labels().list(user).execute();
+		ListLabelsResponse listResponse = service.users().labels().list(USER).execute();
 		List<Label> labels = listResponse.getLabels();
 		if (labels.size() == 0) {
 			System.out.println("No labels found.");
@@ -124,29 +141,39 @@ public class GMailInboxStats {
 				System.out.printf("- %s\n", label.getName());
 			}
 		}
-
-		ListMessagesResponse response = service.users().messages().list(user).setQ("label:inbox label:unread").execute();
+		
+		ListMessagesResponse response = service.users().messages().list(USER).setQ(QUERRY).execute();
 		// label:unread
 		List<Message> messages = new ArrayList<Message>();
+		System.out.println("Query " + QUERRY + " Result size: " + response.getResultSizeEstimate());
 		while (response.getMessages() != null) {
 			messages.addAll(response.getMessages());
 			if (response.getNextPageToken() != null) {
 				String pageToken = response.getNextPageToken();
-				response = service.users().messages().list(user).setQ("label:inbox").setPageToken(pageToken).execute(); //
+				response = service.users().messages().list(USER).setQ(QUERRY).setPageToken(pageToken).execute(); //
 			} else {
 				break;
 			}
 		}
 
+		// Stores number of occurrences for a single email addresses
 		Map<String, Integer> emailAddressCountMap = new HashMap<String, Integer>();
+
+		// Changing number of concurrent threads in a parallel stream
+		System.setProperty("java.util.concurrent.ForkJoinPool.common.parallelism", PARALLEL_THREADS);
+
+		// Iterate over all messages
 		messages.parallelStream().forEach(message -> {
 			try {
-				Message m1 = service.users().messages().get(user, message.getId()).setFields("payload/headers")
+				// Retrieves header only, not full message
+				Message m1 = service.users().messages().get(USER, message.getId()).setFields("payload/headers")
 						.execute();
 
+				// Extract FROM email address
 				Stream<String> fromHeaderValue = m1.getPayload().getHeaders().stream()
 						.filter(h -> "From".equals(h.getName())).map(h -> getEmailAddress(h.getValue()));
 
+				// Stores email address in address/count map
 				String[] tmpArray = fromHeaderValue.toArray(String[]::new);
 				if (tmpArray.length > 0) {
 					String emailAddress = tmpArray[0];
@@ -162,14 +189,17 @@ public class GMailInboxStats {
 				}
 			}
 
-			catch (Exception e3) {
-				// TODO Auto-generated catch block
-				e3.printStackTrace();
+			catch (Exception e) {
+				e.printStackTrace();
 			}
 		});
 
+		
+		// FILTER AND DISPLAY RESULTS
 		Stream<Entry<String, Integer>> sortedEmailAddressCountMap = emailAddressCountMap.entrySet().stream()
-				.filter(e -> e.getValue() > 20).sorted((e1, e2) -> e1.getValue().compareTo(e2.getValue()));
+				.filter(e -> {
+					return e.getValue() > MIN_OCURRENCES_THRESHOLD;
+				}).sorted((e1, e2) -> e1.getValue().compareTo(e2.getValue()));
 
 		System.out.println("RESULTS ORDERED AND FILTERED");
 		sortedEmailAddressCountMap.forEach(e -> {
@@ -179,7 +209,9 @@ public class GMailInboxStats {
 	}
 
 	/**
-	 * Returns only the email address contained in the string
+	 * Extract the email address contained in the string
+	 * 
+	 * @return email address or original string if no valid email is found.
 	 */
 	public static String getEmailAddress(String emailField) {
 		Matcher emailMatcher = VALID_EMAIL_ADDRESS_REGEX.matcher(emailField);

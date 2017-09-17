@@ -82,9 +82,9 @@ public class GMailInboxStats {
 	final static int MIN_OCURRENCES_THRESHOLD = 5;
 	
 	/** User query. Scope of stats */
-	final static String QUERRY = "is:unread label:INBOX";
+	final static String QUERRY = "label:INBOX";
 	
-	final static String USER = "rdmborja@gmail.com";
+	final static String USER = "rafaelborja@gmail.com";
 
 	static {
 		try {
